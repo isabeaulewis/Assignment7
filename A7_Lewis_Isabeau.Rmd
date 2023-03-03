@@ -1,0 +1,176 @@
+---
+title: "Assignment 7"
+author: "Isabeau Lewis"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Reading the nexus file
+```{r}
+# Reading the file
+library(ape)
+DragonNexus<-read.nexus.data("./data/DragonMatrix.nex")
+
+# Making it a data frame
+DragonNexusDF<-data.frame(matrix(unlist(DragonNexus), ncol=78, byrow=TRUE))
+row.names(DragonNexusDF)<-names(DragonNexus)
+tail(DragonNexusDF)
+```
+
+# Appending my dragon data to the file:
+Reading in my trait codes:
+```{r}
+StGeorge<-read.csv("./data/StGeorge_Traits.csv", colClasses="character")
+Dove<-read.csv("./data/DoveIsabeau_Traits.csv", colClasses="character")
+Merlin<-read.csv("./data/Merlin_Traits.csv", colClasses="character")
+
+head(StGeorge) # Example of the ouput - 'Binary' column read correctly as a character
+```
+
+Extracting my 'Binary' columns as lists:
+```{r}
+StGeorge_list <- strsplit(x=paste0(StGeorge$Binary, collapse=""), split="") # Each number in the sequence (collapsed column binary) is one character
+Dove_list <- strsplit(x=paste0(Dove$Binary, collapse=""), split="")
+Merlin_list <- strsplit(x=paste0(Merlin$Binary, collapse=""), split="")
+
+print(StGeorge_list) # Example of output
+```
+
+Creating data frames of these lists to bind to the nexus data set:
+```{r}
+StGeorge_df <- data.frame(matrix(unlist(StGeorge_list), nrow=length(StGeorge_list), byrow=TRUE), row.names="StGeorge")
+Dove_df <- data.frame(matrix(unlist(Dove_list), nrow=length(Dove_list), byrow=TRUE), row.names="Dove")
+Merlin_df <- data.frame(matrix(unlist(Merlin_list), nrow=length(Merlin_list), byrow=TRUE), row.names="Merlin")
+
+print(StGeorge_df) # Example of output
+```
+
+Appending my dragons to the original nexus dataset:
+```{r}
+DragonNexusDF <- rbind(DragonNexusDF, StGeorge_df)
+DragonNexusDF <- rbind(DragonNexusDF, Dove_df)
+DragonNexusDF <- rbind(DragonNexusDF, Merlin_df)
+tail(DragonNexusDF)
+```
+
+# Weighting the traits
+Reading in weighting data:
+```{r}
+WeightsDat<-read.csv("./data/weights.csv")
+```
+
+Creating a single vector of weights:
+```{r}
+Weights<-paste0(WeightsDat$Weight, collapse="")
+Weights<-strsplit(Weights, split="")[[1]]
+```
+
+Converting each letter to a value:
+```{r}
+LETTERS #built-in object
+which(LETTERS=="G")
+```
+
+Creating a numeric version of weights:
+```{r}
+WeightsNum<-rep(NA, length(Weights))
+for(i in 1:length(WeightsNum)){
+  if(Weights[i] %in% LETTERS){
+    WeightsNum[i]<-which(LETTERS==Weights[i])+9
+  } else {
+    WeightsNum[i]<-Weights[i]
+  }
+}
+WeightsNum<-as.numeric(WeightsNum)
+```
+
+Multiplying the weight value by the trait vector for each dragon:
+```{r}
+WtDragonNexusDF<-DragonNexusDF
+for(i in 1:length(DragonNexusDF)){
+  RepWeight<-DragonNexusDF[[i]]==1
+  WtDragonNexusDF[[i]][RepWeight]<-WeightsNum[RepWeight]
+  RepWeight<-NA
+}
+```
+
+Re-calculating the distance matrix:
+```{r}
+WtDragonDist<-dist(WtDragonNexusDF, method="euclidean")
+WtDragonDistMat<-as.matrix(WtDragonDist)
+```
+
+```{r}
+library("reshape2")
+library("ggplot2")
+WtPDat<-melt(WtDragonDistMat)
+ggplot(data=WtPDat, aes(x=Var1, y=Var2, fill=value)) +
+  geom_tile() +
+  scale_fill_gradientn(colours=c("white", "blue", "green", "red")) +
+  theme(axis.text.x = element_text(angle=90, hjust=1, vjust=0.5))
+```
+
+> Figure 1: A heat map of pairwise comparisons between each dragon's traits. Dragons are listed by name along the x and y axes. Colouring indicates similarity level, with a higher similarity indicated by a warmer colour (see legend).
+
+# Dragon images :)
+
+![Figure 2: The dragon and Saint George](images/stgeorge-and-dragon.jpg)
+
+Art by Norman Ault. Retrieved [here](https://artuk.org/discover/artworks/saint-george-and-the-dragon-234986)
+
+![Figure 3: Kilgarrah from the show Merlin](images/merlin-dragon.jpg)
+
+From the show BBC Merlin.Retrieved [here](https://www.bbc.co.uk/programmes/profiles/vGQvtLZYhx8v3ST9FKv2jw/great-dragon)
+
+![Figure 4: Dove Isabeau from the book Dove Isabeau, but in dragon form](images/dove-isabeau-dragon.jpg)
+
+From the book Dove Isabeau, illustrated by Dennis Nolan. Retrieved [here](https://ladygeekgirl.wordpress.com/2017/07/13/throwback-thursdays-dove-isabeau/)
+
+
+# Creating a phylogeny
+```{r}
+library("ggtree")
+```
+
+Creating the initial tree:
+```{r}
+WtDragonTree<-fastme.bal(WtDragonDist)
+WtDragonTreeNJ<-nj(WtDragonDist)
+ggtree(WtDragonTreeNJ, layout="rectangular", options(ignore.negative.edge=TRUE))
+```
+
+Adding tip labels:
+```{r}
+Country<-gsub("[0-9\\.]+([^X]+)X*", "\\1", WtDragonTree$tip.label)
+print(Country)
+```
+
+```{r}
+CountryGroups<-split(WtDragonTree$tip.label, Country)
+WtDTcol<-groupOTU(WtDragonTree, CountryGroups)
+```
+
+```{r}
+ggtree(WtDTcol, layout="rectangular", aes(colour=group)) +
+  geom_tiplab(size=2)
+```
+
+> Figure 5: A phylogeny of the relatedness of dragons (n=80). Dragons were phenotyped from photos according to a set of possible trait values, which were subsequently weighted to determine the final phylogeny. 3 of these dragons were sampled from a new set (StGeorge, Merlin, and Dove; see Figs. 2-4). Dragon origin (country, or identity for the new set) is coloured (for details, see the group legend). St. George (in pink, nearer to the top) is most closely related to a clade including a Japanese dragon, while Dove and Merlin are highly ancestral and most closely related to the fish (in yellow and lilac respectively, at the bottom).
+
+# Backstory & interpretation
+
+## Introduction
+  Dragons, mythical creatures often with wings, talons, scales, and occasionally fire-breathing, show incredible diversity, reflective of their existence around the world. However, to date there has been no large-scale (pun intended) examination of the relatedness of dragon species. Given their spread across the world, they may have arisen multiple times on different continents. In this study, we examined morphological differences between dragon species originating from different countries to create a phylogeny of dragon species.
+
+## Methods
+  We assigned binary codes corresponding to trait values for 25 traits for our 80 dragons. These 80 dragons were made up of 77 that had been previously phenotyped, and 3 additional dragons of mostly European origin (from the myth St George, the book Dove Isabeau by Jane Yolen, and the BBC Show _Merlin_) that were recently categorized. We then constructed a distance matrix and ggtree plot to determine the evolutionary relationships between dragons.
+
+## Results
+  We found that the most distantly-related dragons were Dove and Merlin, two of the newly-phenotyped dragons. We found that generally, dragons from different regions clustered together (Figure 5).
+
+## Discussion
+  We found a highly-ancestral phylogenetic relationship between Dove & Merlin and all other dragons. These two were most closely related to fish. Our third newly-phenotyped dragon, StGeorge, clustered farther up the tree with dragons of various other evolutionary origins, mostly European. Our StGeorge result is in line with predictions, given that St George is a historically-relevant dragon that has been around for centuries. Our other two dragons are both from new fictional works, which may show new takes on dragons that don't conform to previous phylogenetic works, especially given that global movement of dragons has led to mixing of phenotypes (at least by the artists that illustrate them). We propose that the DNA of Merlin and Dove be further studied to investigate these differences, at such point as techniques become available.
